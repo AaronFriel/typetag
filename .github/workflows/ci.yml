@@ -17,6 +17,7 @@ jobs:
       matrix:
         rust: [nightly, beta, stable, 1.62.0]
         os: [ubuntu]
+        features: ["", "--no-default-features --features=runtime"]
         include:
           - name: macOS
             os: macos
@@ -32,7 +33,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{matrix.rust}}
-      - run: cargo test
+      - run: cargo test ${{matrix.features}}
 
   clippy:
     name: Clippy

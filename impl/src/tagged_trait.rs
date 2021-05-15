@@ -125,9 +125,25 @@ fn augment_trait(input: &mut ItemTrait, mode: Mode) {
             #[doc(hidden)]
             fn typetag_deserialize(&self);
         });
+
+        cfg_if::cfg_if! {
+            if #[cfg(feature="runtime")] {
+                input.items.push(parse_quote! {
+                    #[doc(hidden)]
+                    fn register() where Self: Sized;
+                });
+            } else {
+                // If not using runtime registration, let it be a no-op.
+                input.items.push(parse_quote! {
+                    #[doc(hidden)]
+                    fn register() where Self: Sized {}
+                });
+            }
+        }
     }
 }
 
+#[cfg(not(feature = "runtime"))]
 fn build_registry(input: &ItemTrait) -> TokenStream {
     let vis = &input.vis;
     let object = &input.ident;
@@ -166,6 +182,44 @@ fn build_registry(input: &ItemTrait) -> TokenStream {
             }
             names.sort_unstable();
             typetag::Registry { map, names }
+        });
+    }
+}
+
+#[cfg(feature = "runtime")]
+fn build_registry(input: &ItemTrait) -> TokenStream {
+    let object = &input.ident;
+
+    quote! {
+        type TypetagStrictest = <dyn #object as typetag::Strictest>::Object;
+        type TypetagFn = typetag::DeserializeFn<TypetagStrictest>;
+
+        pub struct TypetagRegistration {
+            name: &'static str,
+            deserializer: TypetagFn,
+        }
+
+        impl dyn #object {
+            #[doc(hidden)]
+            pub fn typetag_register(name: &'static str, deserializer: TypetagFn) -> () {
+                let registered = TypetagRegistration { name, deserializer };
+
+                let mut registry = TYPETAG.write().unwrap();
+                match registry.map.entry(registered.name) {
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        entry.insert(std::option::Option::Some(registered.deserializer));
+                    }
+                    std::collections::btree_map::Entry::Occupied(mut entry) => {
+                        entry.insert(std::option::Option::None);
+                    }
+                }
+                registry.names.push(registered.name);
+                registry.names.sort_unstable();
+            }
+        }
+
+        static TYPETAG: typetag::once_cell::sync::Lazy<typetag::Registry<TypetagStrictest>> = typetag::once_cell::sync::Lazy::new(|| {
+            typetag::Registry::default()
         });
     }
 }

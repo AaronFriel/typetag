@@ -26,26 +26,48 @@ pub(crate) fn expand(args: ImplArgs, mut input: ItemImpl, mode: Mode) -> TokenSt
     let object = &input.trait_.as_ref().unwrap().1;
     let this = &input.self_ty;
 
-    let mut expanded = quote! {
-        #input
-    };
-
-    if mode.de {
-        expanded.extend(quote! {
-            typetag::inventory::submit! {
-                <dyn #object>::typetag_register(
-                    #name,
-                    (|deserializer| std::result::Result::Ok(
-                        std::boxed::Box::new(
-                            typetag::erased_serde::deserialize::<#this>(deserializer)?
+    cfg_if::cfg_if! {
+        if #[cfg(feature="runtime")] {
+            input.items.push(parse_quote! {
+                #[doc(hidden)]
+                fn register() {
+                    <dyn #object>::typetag_register(
+                        #name,
+                        |deserializer| std::result::Result::Ok(
+                            std::boxed::Box::new(
+                                typetag::erased_serde::deserialize::<#this>(deserializer)?
+                            ),
                         ),
-                    )) as typetag::DeserializeFn<<dyn #object as typetag::Strictest>::Object>,
-                )
-            }
-        });
-    }
+                    )
+                }
+            });
 
-    expanded
+            quote! {
+                #input
+            }
+        } else /* if #[cfg(feature="runtime")] */ {
+            let mut expanded = quote! {
+                #input
+            };
+
+            if mode.de {
+                expanded.extend(quote! {
+                    typetag::inventory::submit! {
+                        <dyn #object>::typetag_register(
+                            #name,
+                            (|deserializer| std::result::Result::Ok(
+                                std::boxed::Box::new(
+                                    typetag::erased_serde::deserialize::<#this>(deserializer)?
+                                ),
+                            )) as typetag::DeserializeFn<<dyn #object as typetag::Strictest>::Object>,
+                        )
+                    }
+                });
+            }
+
+            expanded
+        }
+    }
 }
 
 fn augment_impl(input: &mut ItemImpl, name: &TokenStream, mode: Mode) {
